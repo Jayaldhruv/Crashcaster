@@ -64,7 +64,7 @@ Feel free to fork the repository, submit issues, or suggest enhancements. Pull r
 ## Acknowledgements
 - Data provided by [CoinGecko API](https://www.coingecko.com/en/api).
 - Built with [Streamlit](https://streamlit.io/) for an interactive web interface.
-- Developed by [Your Name].
+- Developed by Athika, Shreya, Dhruv.
 
 ## Contact
 For questions or feedback, reach out via the GitHub Issues tab or [your.email@example.com].
