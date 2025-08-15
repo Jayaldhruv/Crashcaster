@@ -5,7 +5,6 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
-
 # -----------------------------------------------------------------------------
 # App config & light CSS
 # -----------------------------------------------------------------------------
@@ -22,38 +21,32 @@ div.block-container {padding-top: 1.0rem;}
 .stDataFrame {overflow-x: auto;}
 </style>
 """, unsafe_allow_html=True)
-
 def reason_badges(text: str):
     parts = [p.strip() for p in (text or "").split(";") if p.strip()]
     html = "".join([f"<span class='badge {'red' if ('High' in p or 'Large' in p) else 'green'}'>{p}</span>" for p in parts])
     return html or "<span class='badge green'>Stable</span>"
-
 # -----------------------------------------------------------------------------
 # Data config
 # -----------------------------------------------------------------------------
 BASE_URL_CG = "https://api.coingecko.com/api/v3"
+BASE_URL_CP = "https://api.coinpaprika.com/v1"
 CACHE_DIR = pathlib.Path("./cache"); CACHE_DIR.mkdir(exist_ok=True)
 OFFLINE_DIR = pathlib.Path("./offline"); OFFLINE_DIR.mkdir(exist_ok=True)
 OFFLINE_FILE = OFFLINE_DIR / "markets_sample.json"
-TIMEOUT, REQUEST_DELAY, CACHE_TTL = 8, 2.0, 600  # small timeouts so cloud never hangs
-
+TIMEOUT, REQUEST_DELAY, CACHE_TTL = 8, 2.0, 600 # small timeouts so cloud never hangs
 def _cache_path(key): return CACHE_DIR / f"{key}.json"
-
 def _read_cache(key, ttl=CACHE_TTL):
     p = _cache_path(key)
     if not p.exists(): return None
     if time.time() - p.stat().st_mtime > ttl: return None
     try: return json.loads(p.read_text())
     except: return None
-
 def _write_cache(key, data): _cache_path(key).write_text(json.dumps(data))
-
 def pct_change_from_sparkline(prices, hours):
     if not prices or len(prices) <= hours: return None
     last = float(prices[-1]); prev = float(prices[-hours-1])
     if prev == 0: return None
     return 100.0 * (last - prev) / prev
-
 # -----------------------------------------------------------------------------
 # Primary source (CoinGecko)
 # -----------------------------------------------------------------------------
@@ -70,9 +63,8 @@ def fetch_cg_markets(max_coins=30, currency="usd", ttl=CACHE_TTL):
         raise RuntimeError(f"CG {r.status_code}")
     data = r.json()
     _write_cache(key, data)
-    time.sleep(REQUEST_DELAY)  # polite
+    time.sleep(REQUEST_DELAY) # polite
     return data, "LIVE(CG)"
-
 def norm_from_cg(row):
     return {
         "id": row.get("id"),
@@ -87,7 +79,34 @@ def norm_from_cg(row):
         "price_change_percentage_30d": row.get("price_change_percentage_30d_in_currency", row.get("price_change_percentage_30d")),
         "sparkline": (row.get("sparkline") or {}).get("price", []),
     }
-
+# Secondary source (CoinPaprika)
+def fetch_cp_markets(max_coins=30, currency="usd", ttl=CACHE_TTL):
+    key = f"cp_{currency}_{max_coins}"
+    cached = _read_cache(key, ttl=ttl)
+    if cached is not None:
+        return cached, "CACHE(CP)"
+    url = f"{BASE_URL_CP}/tickers?quotes={currency}&limit={max_coins}"
+    r = requests.get(url, timeout=TIMEOUT, headers={"Accept": "application/json"})
+    if r.status_code != 200:
+        raise RuntimeError(f"CP {r.status_code}")
+    data = r.json()
+    _write_cache(key, data)
+    time.sleep(REQUEST_DELAY) # polite
+    return data, "LIVE(CP)"
+def norm_from_cp(row):
+    return {
+        "id": row.get("id"),
+        "name": row.get("name"),
+        "symbol": (row.get("symbol") or "").upper(),
+        "current_price": row.get("quotes", {}).get(currency, {}).get("price"),
+        "market_cap": row.get("quotes", {}).get(currency, {}).get("market_cap"),
+        "volume_24h": row.get("quotes", {}).get(currency, {}).get("volume_24h"),
+        "price_change_percentage_1h": row.get("quotes", {}).get(currency, {}).get("percent_change_1h"),
+        "price_change_percentage_24h": row.get("quotes", {}).get(currency, {}).get("percent_change_24h"),
+        "price_change_percentage_7d": row.get("quotes", {}).get(currency, {}).get("percent_change_7d"),
+        "price_change_percentage_30d": row.get("quotes", {}).get(currency, {}).get("percent_change_30d"),
+        "sparkline": [], # CoinPaprika doesn't provide sparkline; use empty list
+    }
 def load_offline_json():
     if OFFLINE_FILE.exists():
         age = time.time() - OFFLINE_FILE.stat().st_mtime
@@ -96,13 +115,12 @@ def load_offline_json():
         try: return json.loads(OFFLINE_FILE.read_text())
         except: return []
     return []
-
 def get_markets_with_fallback(source="auto", max_coins=30, currency="usd"):
     """
     Returns: (df, src_used, last_error)
     """
     last_err = None
-    # Try live if allowed
+    # Try CoinGecko first
     if source in ("auto", "primary"):
         try:
             rows, src = fetch_cg_markets(max_coins, currency)
@@ -120,6 +138,21 @@ def get_markets_with_fallback(source="auto", max_coins=30, currency="usd"):
             return df, src, None
         except Exception as e:
             last_err = e
+    # Try CoinPaprika as secondary
+    if source in ("auto", "secondary") and last_err:
+        try:
+            rows, src = fetch_cp_markets(max_coins, currency)
+            norm = [norm_from_cp(r) for r in rows][:max_coins]
+            # refresh offline snapshot (best-effort)
+            try: OFFLINE_FILE.write_text(json.dumps(norm, indent=2))
+            except: pass
+            df = pd.DataFrame(norm)
+            # Approximate 48h and 72h based on 24h data
+            df["price_change_percentage_48h"] = df["price_change_percentage_24h"] * 2
+            df["price_change_percentage_72h"] = df["price_change_percentage_24h"] * 3
+            return df, src, None
+        except Exception as e:
+            last_err = e if not last_err else f"{last_err}; {e}"
     # Fallback to offline if present
     raw = load_offline_json()
     if raw:
@@ -127,13 +160,11 @@ def get_markets_with_fallback(source="auto", max_coins=30, currency="usd"):
         if "sparkline" in df.columns:
             df["price_change_percentage_48h"] = df["sparkline"].apply(lambda p: pct_change_from_sparkline(p, 48))
             df["price_change_percentage_72h"] = df["sparkline"].apply(lambda p: pct_change_from_sparkline(p, 72))
-            # compute 24h if missing
             if "price_change_percentage_24h" not in df.columns or df["price_change_percentage_24h"].isna().all():
                 df["price_change_percentage_24h"] = df["sparkline"].apply(lambda p: pct_change_from_sparkline(p, 24))
         return df, "OFFLINE(JSON)", last_err
     # Nothing available
     return pd.DataFrame(), "NO_DATA", f"{last_err}"
-
 # -----------------------------------------------------------------------------
 # Features + risk
 # -----------------------------------------------------------------------------
@@ -144,14 +175,12 @@ def _coerce_numeric(df):
               "price_change_percentage_7d", "price_change_percentage_30d"]:
         if c in df.columns: df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
-
 def _norm(s: pd.Series) -> pd.Series:
     s2 = s.replace([np.inf, -np.inf], np.nan)
     m, sd = s2.mean(), s2.std()
     if not np.isfinite(sd) or sd == 0: return pd.Series(0, index=s.index)
     z = (s2 - m) / sd
     return 1 / (1 + np.exp(-z))
-
 def build_features_and_risk(df: pd.DataFrame) -> pd.DataFrame:
     df = _coerce_numeric(df.copy())
     # Impute missing values
@@ -179,14 +208,13 @@ def build_features_and_risk(df: pd.DataFrame) -> pd.DataFrame:
     df["risk_reason"] += np.where(df["volume_ratio"] > 0.5, "Heavy volume vs mcap; ", "")
     df["risk_reason"] = df["risk_reason"].str.rstrip("; ").replace("", "Stable / normal range")
     return df
-
 # -----------------------------------------------------------------------------
 # Sidebar controls
 # -----------------------------------------------------------------------------
 with st.sidebar:
     st.header("Settings")
     source = st.selectbox("Data source", ["offline", "auto", "primary"], index=0)
-    max_coins = st.slider("Coins", 10, 50, 30)  # Capped at 50 for performance
+    max_coins = st.slider("Coins", 10, 50, 30) # Capped at 50 for performance
     threshold = st.slider("Risk threshold", 0, 100, 70)
     st.caption("Utilities")
     if st.button("Refresh offline snapshot"):
@@ -202,7 +230,6 @@ with st.sidebar:
             try: p.unlink()
             except: pass
         st.success("Cache cleared.")
-
 # -----------------------------------------------------------------------------
 # Cached loader with safe fallbacks
 # -----------------------------------------------------------------------------
@@ -212,7 +239,6 @@ def load_and_score(src, n):
     if not df.empty:
         df = build_features_and_risk(df).sort_values("risk_score", ascending=False).reset_index(drop=True)
     return df, src_used, last_err
-
 # -----------------------------------------------------------------------------
 # Main UI
 # -----------------------------------------------------------------------------
@@ -220,17 +246,14 @@ st.title("💥 Crashcaster — Early Warning for Crypto Crashes")
 st.markdown("Monitor cryptocurrency crash risks using real-time market data. Select a coin to analyze or explore high-risk assets below.")
 with st.spinner("Loading and scoring coins..."):
     df, src_used, last_err = load_and_score(source, max_coins)
-
 # If nothing to show, don’t crash the UI
 if df.empty:
     st.error("No data available yet.")
     st.write("Try **Data source → offline** (after refreshing the offline snapshot) or **Data source → primary**.")
     if last_err: st.caption(f"Last error: {last_err}")
     st.stop()
-
 # Format prices for readability
 df["current_price"] = df["current_price"].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "—")
-
 # KPIs
 c1, c2, c3, c4 = st.columns(4)
 top = df.iloc[0]
@@ -240,7 +263,6 @@ c3.metric("Coins ≥ Threshold", f"{(df['risk_score'] >= threshold).sum()}/{len(
 c4.metric("Data Source", src_used)
 if src_used.startswith("OFFLINE") and last_err:
     st.warning(f"Using offline snapshot. Live fetch previously failed with: {last_err}")
-
 # Hero “Try it now”
 st.markdown("### Try it now")
 left, right = st.columns([3, 1])
@@ -296,7 +318,6 @@ if "selected_symbol" in st.session_state:
             gauge.update_layout(height=220, margin=dict(l=10, r=10, t=30, b=10))
             st.plotly_chart(gauge, use_container_width=True)
             st.markdown(f"<div>{reason_badges(r['risk_reason'])}</div>", unsafe_allow_html=True)
-
 # Tabs
 tab1, tab2 = st.tabs(["📊 Dashboard", "✅ Recommendations"])
 with tab1:
@@ -336,7 +357,6 @@ with tab1:
                        labels={"price_change_percentage_24h": "24h %", "symbol": "Coin"})
     fig_moves.update_layout(font=dict(size=12), margin=dict(l=10, r=10, t=50, b=10))
     st.plotly_chart(fig_moves, use_container_width=True)
-
 with tab2:
     def recommend_coins_local(dff, strategy="trend", top_k=10):
         d = dff.copy()
@@ -354,7 +374,7 @@ with tab2:
                     (c24 > 0) & ok_nonneg_or_nan(d["price_change_percentage_48h"]) &
                     ok_nonneg_or_nan(d["price_change_percentage_72h"]))
             score = (0.60 * c24 + 0.25 * c48 + 0.15 * c72 - 0.20 * vol)
-        else:  # reversal
+        else: # reversal
             mask = ((d["risk_score"] < 55) & (c24 < 0) &
                     ok_nonneg_or_nan(d["price_change_percentage_72h"]) &
                     (vol < vol.quantile(0.8)))
@@ -371,9 +391,7 @@ with tab2:
                 "price_change_percentage_48h", "price_change_percentage_72h",
                 "volatility_proxy", "risk_score", "risk_reason", "recommend_score"]
         return out[cols]
-
     strat = st.selectbox("Strategy", ["trend", "reversal"], index=0)
     rec = recommend_coins_local(df, strat, top_k=10)
     st.dataframe(rec, use_container_width=True)
-
 st.caption("Tip: If the API hiccups, use the sidebar to create an offline snapshot and switch Data source → 'offline'. Not financial advice.")
