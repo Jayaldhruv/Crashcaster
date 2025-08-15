@@ -283,29 +283,48 @@ with tab1:
     
     st.dataframe(danger[[
         "name","symbol","current_price",
-        "price_change_percentage_24h","price_change_percentage_48h","price_change_percentage_72h",
+        "price_change_percentage_24h",
         "price_change_percentage_7d",
         "volatility_proxy","volume_24h","market_cap","risk_score","risk_reason"
     ]], use_container_width=True)
 
     st.subheader("All Coins")
-    st.dataframe(df[[
+    all_df=df.copy()
+    all_df["risk_score"]=all_df["risk_score"].round(0).astype("Int64")
+    st.dataframe(all_df[[
         "name","symbol","current_price",
-        "price_change_percentage_24h","price_change_percentage_48h","price_change_percentage_72h",
+        "price_change_percentage_24h",
         "price_change_percentage_7d",
         "volatility_proxy","volume_24h","market_cap","risk_score","risk_reason"
     ]], use_container_width=True)
 
-    st.subheader("Charts")
-    top_risk = df.nlargest(10, "risk_score")
-    fig1 = px.bar(top_risk, x="symbol", y="risk_score", title="Top-10 Crash Risk")
-    st.plotly_chart(fig1, use_container_width=True)
-    fig2 = go.Figure()
-    fig2.add_bar(name="24h %", x=df["symbol"], y=df["price_change_percentage_24h"])
-    fig2.add_bar(name="48h %", x=df["symbol"], y=df["price_change_percentage_48h"])
-    fig2.add_bar(name="72h %", x=df["symbol"], y=df["price_change_percentage_72h"])
-    fig2.update_layout(barmode="group", title="Price Change: 24/48/72h")
-    st.plotly_chart(fig2, use_container_width=True)
+st.subheader("Charts")
+
+# A) Top-10 by risk (sorted, cleaner)
+top_risk = df.nlargest(10, "risk_score").sort_values("risk_score", ascending=True)
+fig1 = px.bar(top_risk, x="risk_score", y="symbol", orientation="h",
+              title="Top-10 Crash Risk (higher = riskier)",
+              labels={"risk_score":"Risk score (0–100)", "symbol": "Coin"})
+# add the threshold as a vertical line so “danger zone” pops
+fig1.add_vline(x=threshold, line_dash="dash", line_width=2)
+st.plotly_chart(fig1, use_container_width=True)
+
+# B) Risk distribution + threshold line
+fig_hist = px.histogram(df, x="risk_score", nbins=20,
+                        title="Risk Score Distribution",
+                        labels={"risk_score":"Risk score (0–100)"})
+fig_hist.add_vline(x=threshold, line_dash="dash", line_width=2)
+st.plotly_chart(fig_hist, use_container_width=True)
+
+# C) Top-10 24h movers (absolute change), color shows sign
+movers = df.assign(abs24=df["price_change_percentage_24h"].abs()) \
+           .nlargest(10, "abs24") \
+           .sort_values("price_change_percentage_24h", ascending=True)
+fig_moves = px.bar(movers, x="price_change_percentage_24h", y="symbol", orientation="h",
+                   title="Top-10 24h Movers (±)",
+                   labels={"price_change_percentage_24h":"24h %", "symbol":"Coin"})
+st.plotly_chart(fig_moves, use_container_width=True)
+
 
 with tab2:
     def recommend_coins_local(dff, strategy="trend", top_k=10):
