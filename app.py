@@ -278,7 +278,9 @@ tab1, tab2 = st.tabs(["📊 Dashboard","✅ Recommendations"])
 
 with tab1:
     st.subheader("At-Risk Coins")
-    danger = df[df["risk_score"]>=threshold]
+    danger = df[df["risk_score"]>=threshold].copy()
+    danger["risk_score"]=danger["risk_score'].round(0).astype("Int64")
+    
     st.dataframe(danger[[
         "name","symbol","current_price",
         "price_change_percentage_24h","price_change_percentage_48h","price_change_percentage_72h",
