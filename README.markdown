@@ -67,4 +67,4 @@ Feel free to fork the repository, submit issues, or suggest enhancements. Pull r
 - Developed by Athika, Shreya, Dhruv.
 
 ## Contact
-For questions or feedback, reach out via the GitHub Issues tab or [your.email@example.com].
+For questions or feedback, reach out via the GitHub Issues tab.
