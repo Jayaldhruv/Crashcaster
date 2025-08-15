@@ -374,7 +374,6 @@ with tab2:
 
     strat = st.selectbox("Strategy", ["trend", "reversal"], index=0)
     rec = recommend_coins_local(df, strat, top_k=10)
-    rec["current_price"] = rec["current_price"].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "—")
     st.dataframe(rec, use_container_width=True)
 
 st.caption("Tip: If the API hiccups, use the sidebar to create an offline snapshot and switch Data source → 'offline'. Not financial advice.")
