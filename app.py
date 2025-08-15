@@ -275,9 +275,11 @@ if "selected_symbol" in st.session_state:
             s24 = r.get("price_change_percentage_24h", 0) or 0
             s48 = r.get("price_change_percentage_48h", np.nan)
             s72 = r.get("price_change_percentage_72h", np.nan)
-            s48_txt = f"{s48:+.2f}%" if pd.notna(s48) else "—"
-            s72_txt = f"{s72:+.2f}%" if pd.notna(s72) else "—"
-            st.markdown(f"**24h:** {s24:+.2f}% · **48h:** {s48_txt} · **72h:** {s72_txt}")
+            s48_txt = f"{s48:+.2f}%" if pd.notna(s48) else None
+            s72_txt = f"{s72:+.2f}%" if pd.notna(s72) else None
+            st.markdown(f"**24h:** {s24:+.2f}%")
+            if s48_txt: st.markdown(f"**48h:** {s48_txt}")
+            if s72_txt: st.markdown(f"**72h:** {s72_txt}")
         with cc2:
             gauge = go.Figure(go.Indicator(
                 mode="gauge+number",
@@ -316,8 +318,14 @@ with tab1:
     fig1 = px.bar(top_risk, x="risk_score", y="symbol", orientation="h",
                   title="Top-10 Crash Risk (higher = riskier)",
                   labels={"risk_score": "Risk Score (0–100)", "symbol": "Coin"})
-    fig1.add_vline(x=threshold, line_dash="dash", line_width=2)
-    fig1.update_layout(font=dict(size=12), margin=dict(l=10, r=10, t=50, b=10))
+    fig1.add_vline(x=threshold, line_dash="dash", line_width=2, line_color="red")
+    fig1.update_layout(
+        font=dict(size=12),
+        margin=dict(l=10, r=10, t=50, b=10),
+        yaxis=dict(range=[-1, 10]),  # Fixed range for visibility
+        bargap=0.2,  # Adjust bar spacing
+        marker_color='rgba(255, 77, 77, 0.7)'  # Semi-transparent red for contrast
+    )
     st.plotly_chart(fig1, use_container_width=True)
     # B) Risk distribution + threshold line
     fig_hist = px.histogram(df, x="risk_score", nbins=20,
@@ -368,7 +376,6 @@ with tab2:
             out = fb.sort_values("recommend_score", ascending=False).head(top_k)
             st.info("Showing fallback list (limited 48/72h data). Refresh the offline snapshot when online to improve results.")
         cols = ["name", "symbol", "current_price", "price_change_percentage_24h",
-                "price_change_percentage_48h", "price_change_percentage_72h",
                 "volatility_proxy", "risk_score", "risk_reason", "recommend_score"]
         return out[cols]
 
