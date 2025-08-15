@@ -278,15 +278,15 @@ tab1, tab2 = st.tabs(["📊 Dashboard","✅ Recommendations"])
 
 with tab1:
     st.subheader("At-Risk Coins")
-    danger = df[df["risk_score"]>=threshold].copy()
-    danger["risk_score"]=danger["risk_score'].round(0).astype("Int64")
-    
+    danger = df[df["risk_score"] >= threshold].copy()
+    danger["risk_score"] = danger["risk_score"].round(0).astype("Int64")  # cleaner alignment
     st.dataframe(danger[[
-        "name","symbol","current_price",
-        "price_change_percentage_24h",
-        "price_change_percentage_7d",
-        "volatility_proxy","volume_24h","market_cap","risk_score","risk_reason"
+    "name","symbol","current_price",
+    "price_change_percentage_24h",  # keep 24h only (hide 48/72 on UI)
+    "price_change_percentage_7d",
+    "volatility_proxy","volume_24h","market_cap","risk_score","risk_reason"
     ]], use_container_width=True)
+
 
     st.subheader("All Coins")
     all_df=df.copy()
