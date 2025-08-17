@@ -14,10 +14,6 @@ Welcome to **CrashCaster**, a real-time cryptocurrency crash risk monitoring too
 ## Demo
 Check out the live app: [CrashCaster on Streamlit Cloud](https://crashcaster.streamlit.app/)
 
-## Screenshots
-![Dashboard](screenshots/dashboard.png)
-![Coin Analysis](screenshots/coin_analysis.png)
-
 ## Installation
 To run CrashCaster locally:
 1. Clone the repository:
